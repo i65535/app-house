@@ -1,0 +1,157 @@
+version: "2"
+services:
+  ntp:
+    container_name: ntp
+    image: jack.io/lib/chrony:v3.2.rc2
+    restart: always
+    privileged: true
+    networks:
+      - apphouse
+    extra_hosts:
+      - "jack.io:{HOST_DOMAIN}"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "1"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "123:123/udp"
+      - "80:80"
+      - "443:443"
+      - "9182:9182"
+      - "8081:8080"
+      - "8082:3000"
+      - "10022:22"
+    cap_add:
+      - SYS_TIME
+      - SYS_NICE
+    mem_limit: 64M
+    read_only: true
+    tmpfs:
+      - /var/run:rw,noexec,nosuid,size=1m
+      - /var/db:rw,noexec,nosuid,size=8m
+      - /app/s6/.s6-svscan:rw,noexec,nosuid,size=1m
+      - /app/s6/ntpd/event:rw,noexec,nosuid,size=1m
+      - /app/s6/ntpd/supervise:rw,noexec,nosuid,size=1m
+  registry:
+    container_name: registry
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "1"
+    image: jack.io/lib/registry:2.6.2
+    volumes:
+      - /var/local/apphouse/registry/config.yml:/etc/docker/registry/config.yml:ro
+      - /var/local/apphouse/registry/ssl:/ssl:ro
+      - /var/local/apphouse/storage/registry:/var/lib/registry:rw
+      - /etc/localtime:/etc/localtime:ro
+    network_mode: service:ntp
+  mongodb:
+    container_name: mongodb
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "1"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/local/apphouse/storage/mongodb/data/log/trace:/mongodb/data/log/trace
+      - /var/local/apphouse/storage/mongodb/data/db:/mongodb/data/db:rw
+      - /var/local/apphouse/mongodb/mongodb.conf:/mongodb/conf/mongodb.conf
+    image: jack.io/apphouse/mongodb:v2.0
+    network_mode: service:ntp
+    command: /mongodb/mongodb/bin/mongod -f /mongodb/conf/mongodb.conf --dbpath /mongodb/data/db
+  collector:
+    container_name: collector
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "1"
+    image: jack.io/apphouse/collector:v1.1.0.1
+    volumes:
+      - /var/local/apphouse/collector/trace/:/opt/source/Trace:rw
+      - /var/local/apphouse/collector/wwwroot:/opt/wwwroot:rw
+      - /var/local/apphouse/collector/config.conf:/opt/source/frame/conf/config.conf:rw
+      - /var/local/apphouse/registry/ssl:/opt/source/frame/ssl:rw
+      - /var/local/apphouse/nginxconf:/opt/source/frame/nginxconf:rw
+      - /var/local/apphouse/storage/repository:/opt/source/repository:rw
+      - /var/local/apphouse/storage:/.hidden/root:ro
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - /proc:/host/proc:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - MONGO_CONNECT_STRING={MONGO_CONNECT_STRING}
+      - REGISTRY_DOMAIN={REGISTRY_DOMAIN}
+    network_mode: service:ntp
+  ui:
+    container_name: ui
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "1"
+    privileged: true
+    image: jack.io/apphouse/ui:v1.1.0.1
+    network_mode: service:ntp
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/local/apphouse/registry/ssl:/etc/nginx/conf.d/ssl
+      - /var/local/apphouse/nginxconf/http.conf:/etc/nginx/conf.d/http.conf
+      - /var/local/apphouse/nginxconf/https.conf:/etc/nginx/conf.d/https.conf
+      - /var/local/apphouse/nginxconf/nginx.conf:/etc/nginx/nginx.conf
+  jenkins:
+    container_name: jenkins
+    privileged: true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "1"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/local/apphouse/jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/local/apphouse/ssh:/root/.ssh
+    image: jack.io/lib/jenkins:v1.5.2
+    network_mode: service:ntp
+    environment:
+      - UFLOW_ENTRY={HOST_DOMAIN}
+      - HOST_DOMAIN={HOST_DOMAIN}
+      - JENKINS_IP=http://{HOST_DOMAIN}:8081
+  mysql:
+    container_name: mysql
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "1"
+    image: jack.io/lib/mysql:5.7.24
+    volumes:
+      - /var/local/apphouse/mysql/data:/var/lib/mysql
+      - /var/local/apphouse/mysql/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+      - /etc/localtime:/etc/localtime:ro
+    network_mode: service:ntp
+    environment:
+      - TERM=dumb
+      - MYSQL_ROOT_PASSWORD=123456
+    command: mysqld --innodb_file_per_table  
+  gogs:
+    container_name: gogs
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "1"
+    image: jack.io/gogs/gogs:20181120
+    volumes:
+      - /var/local/apphouse/gogs:/data
+      - /etc/localtime:/etc/localtime:ro
+    network_mode: service:ntp
+networks:
+  apphouse:
+    external: false
